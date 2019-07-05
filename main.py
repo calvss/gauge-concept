@@ -9,7 +9,7 @@ import RPi.GPIO as GPIO
 
 BUFFERSIZE = 20
 
-coilTimeConstant = 0.002 # time each stepper coil is powered
+#coilTimeConstant = 0.002 # time each stepper coil is powered
 spiReceiveRate = 0.05 # receive message every 0.1 seconds
 
 lock = threading.Lock()
@@ -60,16 +60,22 @@ class SPIListenerClass(threading.Thread):
         spi.close()
 
 class StepperClass(threading.Thread):
-    def __init__(self):
+    def __init__(self, pinA, pinB, pinC, pinD, coilTimeConstant):
         threading.Thread.__init__(self)
         self.exitFlag = threading.Event()
+        GPIO.setmode(GPIO.BCM)
+
+        self.__pinA__ = pinA
+        self.__pinB__ = pinB
+        self.__pinC__ = pinC
+        self.__pinD__ = pinD
+        self.coilTimeConstant = coilTimeConstant
 
     def run(self):
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(2, GPIO.OUT)
-        GPIO.setup(3, GPIO.OUT)
-        GPIO.setup(4, GPIO.OUT)
-        GPIO.setup(5, GPIO.OUT)
+        GPIO.setup(self.__pinA__, GPIO.OUT)
+        GPIO.setup(self.__pinB__, GPIO.OUT)
+        GPIO.setup(self.__pinC__, GPIO.OUT)
+        GPIO.setup(self.__pinD__, GPIO.OUT)
 
         currentPoint = 0
 
@@ -95,57 +101,57 @@ class StepperClass(threading.Thread):
 
         GPIO.cleanup()
 
-def stepCW():
+    def __stepCW__(self):
 
-    GPIO.output(2, GPIO.HIGH)
-    GPIO.output(3, GPIO.LOW)
-    GPIO.output(4, GPIO.LOW)
-    GPIO.output(5, GPIO.LOW)
-    time.sleep(coilTimeConstant)
+        GPIO.output(self.__pinA__, GPIO.HIGH)
+        GPIO.output(self.__pinB__, GPIO.LOW)
+        GPIO.output(self.__pinC__, GPIO.LOW)
+        GPIO.output(self.__pinD__, GPIO.LOW)
+        time.sleep(self.coilTimeConstant)
 
-    GPIO.output(2, GPIO.LOW)
-    GPIO.output(3, GPIO.LOW)
-    GPIO.output(4, GPIO.HIGH)
-    GPIO.output(5, GPIO.LOW)
-    time.sleep(coilTimeConstant)
+        GPIO.output(self.__pinA__, GPIO.LOW)
+        GPIO.output(self.__pinB__, GPIO.LOW)
+        GPIO.output(self.__pinC__, GPIO.HIGH)
+        GPIO.output(self.__pinD__, GPIO.LOW)
+        time.sleep(self.coilTimeConstant)
 
-    GPIO.output(2, GPIO.LOW)
-    GPIO.output(3, GPIO.HIGH)
-    GPIO.output(4, GPIO.LOW)
-    GPIO.output(5, GPIO.LOW)
-    time.sleep(coilTimeConstant)
+        GPIO.output(self.__pinA__, GPIO.LOW)
+        GPIO.output(self.__pinB__, GPIO.HIGH)
+        GPIO.output(self.__pinC__, GPIO.LOW)
+        GPIO.output(self.__pinD__, GPIO.LOW)
+        time.sleep(self.coilTimeConstant)
 
-    GPIO.output(2, GPIO.LOW)
-    GPIO.output(3, GPIO.LOW)
-    GPIO.output(4, GPIO.LOW)
-    GPIO.output(5, GPIO.HIGH)
-    time.sleep(coilTimeConstant)
+        GPIO.output(self.__pinA__, GPIO.LOW)
+        GPIO.output(self.__pinB__, GPIO.LOW)
+        GPIO.output(self.__pinC__, GPIO.LOW)
+        GPIO.output(self.__pinD__, GPIO.HIGH)
+        time.sleep(self.coilTimeConstant)
 
-def stepCCW():
+    def __stepCCW__(self):
 
-    GPIO.output(2, GPIO.LOW)
-    GPIO.output(3, GPIO.LOW)
-    GPIO.output(4, GPIO.LOW)
-    GPIO.output(5, GPIO.HIGH)
-    time.sleep(coilTimeConstant)
+        GPIO.output(self.__pinA__, GPIO.LOW)
+        GPIO.output(self.__pinB__, GPIO.LOW)
+        GPIO.output(self.__pinC__, GPIO.LOW)
+        GPIO.output(self.__pinD__, GPIO.HIGH)
+        time.sleep(self.coilTimeConstant)
 
-    GPIO.output(2, GPIO.LOW)
-    GPIO.output(3, GPIO.HIGH)
-    GPIO.output(4, GPIO.LOW)
-    GPIO.output(5, GPIO.LOW)
-    time.sleep(coilTimeConstant)
+        GPIO.output(self.__pinA__, GPIO.LOW)
+        GPIO.output(self.__pinB__, GPIO.HIGH)
+        GPIO.output(self.__pinC__, GPIO.LOW)
+        GPIO.output(self.__pinD__, GPIO.LOW)
+        time.sleep(self.coilTimeConstant)
 
-    GPIO.output(2, GPIO.LOW)
-    GPIO.output(3, GPIO.LOW)
-    GPIO.output(4, GPIO.HIGH)
-    GPIO.output(5, GPIO.LOW)
-    time.sleep(coilTimeConstant)
+        GPIO.output(self.__pinA__, GPIO.LOW)
+        GPIO.output(self.__pinB__, GPIO.LOW)
+        GPIO.output(self.__pinC__, GPIO.HIGH)
+        GPIO.output(self.__pinD__, GPIO.LOW)
+        time.sleep(self.coilTimeConstant)
 
-    GPIO.output(2, GPIO.HIGH)
-    GPIO.output(3, GPIO.LOW)
-    GPIO.output(4, GPIO.LOW)
-    GPIO.output(5, GPIO.LOW)
-    time.sleep(coilTimeConstant)
+        GPIO.output(self.__pinA__, GPIO.HIGH)
+        GPIO.output(self.__pinB__, GPIO.LOW)
+        GPIO.output(self.__pinC__, GPIO.LOW)
+        GPIO.output(self.__pinD__, GPIO.LOW)
+        time.sleep(self.coilTimeConstant)
 
 def signalHandler(sig, frame):
     SPIListener.exitFlag.set()
