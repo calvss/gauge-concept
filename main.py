@@ -9,7 +9,7 @@ import RPi.GPIO as GPIO
 
 BUFFERSIZE = 20
 
-#coilTimeConstant = 0.002 # time each stepper coil is powered
+coilTimeConstant = 0.002 # time each stepper coil is powered
 spiReceiveRate = 0.05 # receive message every 0.1 seconds
 
 lock = threading.Lock()
@@ -60,16 +60,23 @@ class SPIListenerClass(threading.Thread):
         spi.close()
 
 class StepperClass(threading.Thread):
-    def __init__(self, pinA, pinB, pinC, pinD, coilTimeConstant):
+    __gpioInitialized__ = False
+    __classInstances__ = 0
+    def __init__(self, pinA, pinB, pinC, pinD, timeConstant):
         threading.Thread.__init__(self)
         self.exitFlag = threading.Event()
-        GPIO.setmode(GPIO.BCM)
+
+        if not __gpioInitialized__:
+            GPIO.setmode(GPIO.BCM)
+            __gpioInitialized__ = True
+
+        __classInstances__ += 1
 
         self.__pinA__ = pinA
         self.__pinB__ = pinB
         self.__pinC__ = pinC
         self.__pinD__ = pinD
-        self.coilTimeConstant = coilTimeConstant
+        self.coilTimeConstant = timeConstant
 
     def run(self):
         GPIO.setup(self.__pinA__, GPIO.OUT)
@@ -81,7 +88,7 @@ class StepperClass(threading.Thread):
 
         #return needle to 0 at the start
         for __ in range(100):
-            stepCCW();
+            self.__stepCCW__();
 
         while not self.exitFlag.is_set():
             with lock:
@@ -91,15 +98,20 @@ class StepperClass(threading.Thread):
             setPoint = math.floor((potValue/1023)*100)
 
             if currentPoint < setPoint:
-                stepCW()
+                self.__stepCW__()
                 currentPoint = currentPoint + 1
             elif currentPoint > setPoint:
-                stepCCW()
+                self.__stepCCW__()
                 currentPoint = currentPoint - 1
             else:
                 pass
 
-        GPIO.cleanup()
+        # decrement number of running stepperClasses
+        __classInstances__ -= 1
+
+        # if you're the last class, clean up after youtself
+        if __classInstances__ == 0:
+            GPIO.cleanup()
 
     def __stepCW__(self):
 
@@ -107,25 +119,25 @@ class StepperClass(threading.Thread):
         GPIO.output(self.__pinB__, GPIO.LOW)
         GPIO.output(self.__pinC__, GPIO.LOW)
         GPIO.output(self.__pinD__, GPIO.LOW)
-        time.sleep(self.coilTimeConstant)
+        time.sleep(self.timeConstant)
 
         GPIO.output(self.__pinA__, GPIO.LOW)
         GPIO.output(self.__pinB__, GPIO.LOW)
         GPIO.output(self.__pinC__, GPIO.HIGH)
         GPIO.output(self.__pinD__, GPIO.LOW)
-        time.sleep(self.coilTimeConstant)
+        time.sleep(self.timeConstant)
 
         GPIO.output(self.__pinA__, GPIO.LOW)
         GPIO.output(self.__pinB__, GPIO.HIGH)
         GPIO.output(self.__pinC__, GPIO.LOW)
         GPIO.output(self.__pinD__, GPIO.LOW)
-        time.sleep(self.coilTimeConstant)
+        time.sleep(self.timeConstant)
 
         GPIO.output(self.__pinA__, GPIO.LOW)
         GPIO.output(self.__pinB__, GPIO.LOW)
         GPIO.output(self.__pinC__, GPIO.LOW)
         GPIO.output(self.__pinD__, GPIO.HIGH)
-        time.sleep(self.coilTimeConstant)
+        time.sleep(self.timeConstant)
 
     def __stepCCW__(self):
 
@@ -133,25 +145,25 @@ class StepperClass(threading.Thread):
         GPIO.output(self.__pinB__, GPIO.LOW)
         GPIO.output(self.__pinC__, GPIO.LOW)
         GPIO.output(self.__pinD__, GPIO.HIGH)
-        time.sleep(self.coilTimeConstant)
+        time.sleep(self.timeConstant)
 
         GPIO.output(self.__pinA__, GPIO.LOW)
         GPIO.output(self.__pinB__, GPIO.HIGH)
         GPIO.output(self.__pinC__, GPIO.LOW)
         GPIO.output(self.__pinD__, GPIO.LOW)
-        time.sleep(self.coilTimeConstant)
+        time.sleep(self.timeConstant)
 
         GPIO.output(self.__pinA__, GPIO.LOW)
         GPIO.output(self.__pinB__, GPIO.LOW)
         GPIO.output(self.__pinC__, GPIO.HIGH)
         GPIO.output(self.__pinD__, GPIO.LOW)
-        time.sleep(self.coilTimeConstant)
+        time.sleep(self.timeConstant)
 
         GPIO.output(self.__pinA__, GPIO.HIGH)
         GPIO.output(self.__pinB__, GPIO.LOW)
         GPIO.output(self.__pinC__, GPIO.LOW)
         GPIO.output(self.__pinD__, GPIO.LOW)
-        time.sleep(self.coilTimeConstant)
+        time.sleep(self.timeConstant)
 
 def signalHandler(sig, frame):
     SPIListener.exitFlag.set()
@@ -172,7 +184,12 @@ if __name__ == "__main__":
     SPIListener = SPIListenerClass()
     SPIListener.start()
 
-    Stepper = StepperClass()
+    Stepper = StepperClass(
+        pinA = 2,
+        pinB = 3,
+        pinC = 4,
+        pinD = 5,
+        timeConstant = coilTimeConstant)
     Stepper.start()
 
     mainWindow = tkinter.Tk(className="gauge")
