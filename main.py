@@ -10,7 +10,7 @@ import RPi.GPIO as GPIO
 BUFFERSIZE = 20
 
 coilTimeConstant = 0.002 # time each stepper coil is powered
-spiReceiveRate = 0.05 # receive message every 0.1 seconds
+spiReceiveRate = 0.1 # receive message every 0.1 seconds
 
 lock = threading.Lock()
 mainExit = threading.Event()
@@ -54,7 +54,7 @@ class SPIListenerClass(threading.Thread):
                 with lock:
                     data = [((reply[byte + 1] << 8) | reply[byte]) for byte in range(0, BUFFERSIZE, 2)]
 
-            print(data)
+            print(data, time.time())
             while time.time() <= tNext:
                 pass
         spi.close()
@@ -62,21 +62,22 @@ class SPIListenerClass(threading.Thread):
 class StepperClass(threading.Thread):
     __gpioInitialized__ = False
     __classInstances__ = 0
-    def __init__(self, pinA, pinB, pinC, pinD, timeConstant):
+    def __init__(self, setPoint, pinA, pinB, pinC, pinD, timeConstant):
         threading.Thread.__init__(self)
         self.exitFlag = threading.Event()
 
-        if not __gpioInitialized__:
+        if not StepperClass.__gpioInitialized__:
             GPIO.setmode(GPIO.BCM)
-            __gpioInitialized__ = True
+            StepperClass.__gpioInitialized__ = True
 
-        __classInstances__ += 1
+        StepperClass.__classInstances__ += 1
 
+        self.setPoint = setPoint
         self.__pinA__ = pinA
         self.__pinB__ = pinB
         self.__pinC__ = pinC
         self.__pinD__ = pinD
-        self.coilTimeConstant = timeConstant
+        self.timeConstant = timeConstant
 
     def run(self):
         GPIO.setup(self.__pinA__, GPIO.OUT)
@@ -87,30 +88,24 @@ class StepperClass(threading.Thread):
         currentPoint = 0
 
         #return needle to 0 at the start
-        for __ in range(100):
+        for __ in range(180):
             self.__stepCCW__();
 
         while not self.exitFlag.is_set():
-            with lock:
-                localCopyOfData = data[:]
-
-            potValue = localCopyOfData[5]
-            setPoint = math.floor((potValue/1023)*100)
-
-            if currentPoint < setPoint:
+            if currentPoint < self.setPoint:
                 self.__stepCW__()
                 currentPoint = currentPoint + 1
-            elif currentPoint > setPoint:
+            elif currentPoint > self.setPoint:
                 self.__stepCCW__()
                 currentPoint = currentPoint - 1
             else:
                 pass
 
         # decrement number of running stepperClasses
-        __classInstances__ -= 1
+        StepperClass.__classInstances__ -= 1
 
         # if you're the last class, clean up after youtself
-        if __classInstances__ == 0:
+        if StepperClass.__classInstances__ == 0:
             GPIO.cleanup()
 
     def __stepCW__(self):
@@ -165,12 +160,26 @@ class StepperClass(threading.Thread):
         GPIO.output(self.__pinD__, GPIO.LOW)
         time.sleep(self.timeConstant)
 
-def signalHandler(sig, frame):
+# class StepperFeederClass(threading.Thread):
+#
+#     def __init__(self):
+#         threading.Thread.__init__(self)
+#         self.exitFlag = threading.Event()
+#
+#     def run(self):
+#         global data
+#
+
+
+def exitHandler(sig, frame):
     SPIListener.exitFlag.set()
-    Stepper.exitFlag.set()
+    throttleGauge.exitFlag.set()
+    ampGauge.exitFlag.set()
     mainExit.set()
 
 def deleteWindowHandler():
+    # when window close button is clicked, send SIGINT to yourself
+    # this lets the exitHandler function kill the threads properly
     os.kill(os.getpid(), signal.SIGINT)
 
 def matrixMultiply(a, b):
@@ -179,18 +188,28 @@ def matrixMultiply(a, b):
     return [[sum(ele_a*ele_b for ele_a, ele_b in zip(row_a, col_b)) for col_b in zip_b] for row_a in a]
 
 if __name__ == "__main__":
-    signal.signal(signal.SIGINT, signalHandler)
+    signal.signal(signal.SIGINT, exitHandler)
 
     SPIListener = SPIListenerClass()
     SPIListener.start()
 
-    Stepper = StepperClass(
+    throttleGauge = StepperClass(
+        setPoint = 0,
         pinA = 2,
         pinB = 3,
         pinC = 4,
         pinD = 5,
         timeConstant = coilTimeConstant)
-    Stepper.start()
+    throttleGauge.start()
+
+    ampGauge = StepperClass(
+        setPoint = 0,
+        pinA = 22,
+        pinB = 23,
+        pinC = 24,
+        pinD = 27,
+        timeConstant = coilTimeConstant)
+    ampGauge.start()
 
     mainWindow = tkinter.Tk(className="gauge")
     mainWindow.protocol("WM_DELETE_WINDOW", deleteWindowHandler)
@@ -235,6 +254,12 @@ if __name__ == "__main__":
 
         potValue = localCopyOfData[5]
         setPoint = math.floor((potValue/1023)*180)
+
+        throttlePos = math.floor((potValue/1023)*100)
+        ampPos = 100 - math.floor((potValue/1023)*100)
+
+        throttleGauge.setPoint = throttlePos
+        ampGauge.setPoint = ampPos
 
         if needleAngle < setPoint:
             affineMatrix = matrixMultiply(translateToHinge, matrixMultiply(rotateCW, translateToOrigin))
