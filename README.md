@@ -4,7 +4,7 @@
 * spidev
 * time
 * signal
-* threading
+* multiprocessing
 * math
 * tkinter
 * RPi.GPIO
