@@ -54,7 +54,7 @@ class SPIListenerClass(threading.Thread):
                 with lock:
                     data = [((reply[byte + 1] << 8) | reply[byte]) for byte in range(0, BUFFERSIZE, 2)]
 
-            print(data, time.time())
+            print(time.time())
             while time.time() <= tNext:
                 pass
         spi.close()
@@ -212,8 +212,10 @@ if __name__ == "__main__":
     ampGauge.start()
 
     mainWindow = tkinter.Tk(className="gauge")
+    mainWindow.attributes("-fullscreen", True)
+    mainWindow.config(cursor="none")
     mainWindow.protocol("WM_DELETE_WINDOW", deleteWindowHandler)
-    canvas = tkinter.Canvas(mainWindow, width = 200, height = 200)
+    canvas = tkinter.Canvas(mainWindow, width = 320, height = 240)
     canvas.pack()
 
     # square = [[50, 50], [100, 50], [100, 100]]
@@ -235,8 +237,8 @@ if __name__ == "__main__":
     # canvas.create_polygon(*square, fill="red")
     # canvas.create_polygon(*squareRotated, fill="blue")
 
-    needleCoords = [[0, 200], [100, 190], [100, 210]]
-    needleHinge = [100, 200]
+    needleCoords = [[0, 240], [160, 230], [160, 250]]
+    needleHinge = [160, 240]
     needleAngle = 0
 
     translateToOrigin = [[1, 0, -needleHinge[0]], [0, 1, -needleHinge[1]], [0, 0, 1]]
@@ -244,7 +246,7 @@ if __name__ == "__main__":
     rotateCW = [[math.cos(math.radians(1)), -math.sin(math.radians(1)), 0], [math.sin(math.radians(1)), math.cos(math.radians(1)), 0], [0, 0, 1]]
     rotateCCW = [[math.cos(math.radians(-1)), -math.sin(math.radians(-1)), 0], [math.sin(math.radians(-1)), math.cos(math.radians(-1)), 0], [0, 0, 1]]
 
-    dial = canvas.create_arc(0, 200, 100, 200, start = 0, extent = 180, fill = "black")
+    dial = canvas.create_arc(0, 80, 320, 400, start = 0, extent = 180, fill = "black")
     needle = canvas.create_polygon(*needleCoords, fill="red")
 
     while not mainExit.is_set():
