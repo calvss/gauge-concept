@@ -2,7 +2,7 @@ import os
 import spidev
 import time
 import signal
-import threading
+import multiprocessing
 import math
 import tkinter
 import RPi.GPIO as GPIO
@@ -11,170 +11,134 @@ BUFFERSIZE = 20
 
 coilTimeConstant = 0.002 # time each stepper coil is powered
 spiReceiveRate = 0.1 # receive message every 0.1 seconds
+stepperLoopRate = 0.01 # step motors every 0.01 seconds
 
-lock = threading.Lock()
-mainExit = threading.Event()
-data = [0] * 10 # slave sends total of 10 integers
+def SPIListenerFunction(dataQueue):
+    spi = spidev.SpiDev()
+    spi.open(1, 0)
+    spi.max_speed_hz = 15200
 
-class SPIListenerClass(threading.Thread):
-    # NOTE: 16-bit words are sent thru SPI one byte (8 bits) at a time
+    tNext = time.time()
 
-    def __init__(self):
-        threading.Thread.__init__(self)
-        self.exitFlag = threading.Event()
+    while not mainExit.is_set():
+        tNext += spiReceiveRate
 
-    def run(self):
-        global data
+        reply = spi.xfer(bytearray(BUFFERSIZE))
 
-        spi = spidev.SpiDev()
-        spi.open(1,0)
-        spi.max_speed_hz = 15200
+        # convert two 8-bit nibbles into one 16-bit word
+        data = [((reply[byte + 1] << 8) | reply[byte]) for byte in range(0, BUFFERSIZE, 2)]
 
-        tNext = time.time()
+        # check if the stop word makes sense (0xAAAA)
+        lastWord = data[-1] # list[-1] returns the last element of the list
+        if lastWord != 0xAAAA:
+            while lastWord != 0xAAAA:
+                print("syncing data")
 
-        while not self.exitFlag.is_set():
-            tNext = tNext + spiReceiveRate
+                # extract one 8-bit byte and append it to lastWord
+                # mask lastWord to limit its length to 16 bits
+                lastWord = ((lastWord << 8) & 0xFFFF) | spi.xfer([0])[0]
+            # after reading correct stop word, read a complete reply
             reply = spi.xfer(bytearray(BUFFERSIZE))
+            data = [((reply[byte + 1] << 8) | reply[byte]) for byte in range(0, BUFFERSIZE, 2)]
 
-            # list operations aren't atomic!
-            with lock:
-                data = [((reply[byte + 1] << 8) | reply[byte]) for byte in range(0, BUFFERSIZE, 2)]
+        data.append(time.time())
+        print(data[-1])
 
-            # check if the stop word makes sense (0xAAAA)
-            lastWord = data[-1] # list[-1] returns the last element of the list
-            if lastWord != 0xAAAA:
-                while lastWord != 0xAAAA:
-                    print("syncing data")
+        dataQueue.put(data)
 
-                    # extract one byte and append it to lastWord
-                    # mask lastWord to limit its length to 16 bits
-                    lastWord = ((lastWord << 8) & 0xFFFF) | spi.xfer([0])[0]
-                # after reading correct stop word, read a complete reply
-                reply = spi.xfer(bytearray(BUFFERSIZE))
-                with lock:
-                    data = [((reply[byte + 1] << 8) | reply[byte]) for byte in range(0, BUFFERSIZE, 2)]
+        while time.time() <= tNext:
+            pass
+    spi.close()
 
-            print(time.time())
-            while time.time() <= tNext:
-                pass
-        spi.close()
+def stepperFunction(dataQueue, pinA, pinB, pinC, pinD, timeConstant):
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(pinA, GPIO.OUT)
+    GPIO.setup(pinB, GPIO.OUT)
+    GPIO.setup(pinC, GPIO.OUT)
+    GPIO.setup(pinD, GPIO.OUT)
 
-class StepperClass(threading.Thread):
-    __gpioInitialized__ = False
-    __classInstances__ = 0
-    def __init__(self, setPoint, pinA, pinB, pinC, pinD, timeConstant):
-        threading.Thread.__init__(self)
-        self.exitFlag = threading.Event()
+    setPoint = 0;
+    currentPoint = 0
 
-        if not StepperClass.__gpioInitialized__:
-            GPIO.setmode(GPIO.BCM)
-            StepperClass.__gpioInitialized__ = True
+    def __stepCW__():
 
-        StepperClass.__classInstances__ += 1
+        GPIO.output(pinB, GPIO.LOW)
+        GPIO.output(pinA, GPIO.HIGH)
+        GPIO.output(pinC, GPIO.LOW)
+        GPIO.output(pinD, GPIO.LOW)
+        time.sleep(timeConstant)
 
-        self.setPoint = setPoint
-        self.__pinA__ = pinA
-        self.__pinB__ = pinB
-        self.__pinC__ = pinC
-        self.__pinD__ = pinD
-        self.timeConstant = timeConstant
+        GPIO.output(pinA, GPIO.LOW)
+        GPIO.output(pinB, GPIO.LOW)
+        GPIO.output(pinC, GPIO.HIGH)
+        GPIO.output(pinD, GPIO.LOW)
+        time.sleep(timeConstant)
 
-    def run(self):
-        GPIO.setup(self.__pinA__, GPIO.OUT)
-        GPIO.setup(self.__pinB__, GPIO.OUT)
-        GPIO.setup(self.__pinC__, GPIO.OUT)
-        GPIO.setup(self.__pinD__, GPIO.OUT)
+        GPIO.output(pinA, GPIO.LOW)
+        GPIO.output(pinB, GPIO.HIGH)
+        GPIO.output(pinC, GPIO.LOW)
+        GPIO.output(pinD, GPIO.LOW)
+        time.sleep(timeConstant)
 
-        currentPoint = 0
+        GPIO.output(pinA, GPIO.LOW)
+        GPIO.output(pinB, GPIO.LOW)
+        GPIO.output(pinC, GPIO.LOW)
+        GPIO.output(pinD, GPIO.HIGH)
+        time.sleep(timeConstant)
 
-        #return needle to 0 at the start
-        for __ in range(180):
-            self.__stepCCW__();
+    def __stepCCW__():
 
-        while not self.exitFlag.is_set():
-            if currentPoint < self.setPoint:
-                self.__stepCW__()
-                currentPoint = currentPoint + 1
-            elif currentPoint > self.setPoint:
-                self.__stepCCW__()
-                currentPoint = currentPoint - 1
-            else:
-                pass
+        GPIO.output(pinA, GPIO.LOW)
+        GPIO.output(pinB, GPIO.LOW)
+        GPIO.output(pinC, GPIO.LOW)
+        GPIO.output(pinD, GPIO.HIGH)
+        time.sleep(timeConstant)
 
-        # decrement number of running stepperClasses
-        StepperClass.__classInstances__ -= 1
+        GPIO.output(pinA, GPIO.LOW)
+        GPIO.output(pinB, GPIO.HIGH)
+        GPIO.output(pinC, GPIO.LOW)
+        GPIO.output(pinD, GPIO.LOW)
+        time.sleep(timeConstant)
 
-        # if you're the last class, clean up after youtself
-        if StepperClass.__classInstances__ == 0:
-            GPIO.cleanup()
+        GPIO.output(pinA, GPIO.LOW)
+        GPIO.output(pinB, GPIO.LOW)
+        GPIO.output(pinC, GPIO.HIGH)
+        GPIO.output(pinD, GPIO.LOW)
+        time.sleep(timeConstant)
 
-    def __stepCW__(self):
+        GPIO.output(pinA, GPIO.HIGH)
+        GPIO.output(pinB, GPIO.LOW)
+        GPIO.output(pinC, GPIO.LOW)
+        GPIO.output(pinD, GPIO.LOW)
+        time.sleep(timeConstant)
 
-        GPIO.output(self.__pinA__, GPIO.HIGH)
-        GPIO.output(self.__pinB__, GPIO.LOW)
-        GPIO.output(self.__pinC__, GPIO.LOW)
-        GPIO.output(self.__pinD__, GPIO.LOW)
-        time.sleep(self.timeConstant)
+    for __ in range(180):
+        __stepCCW__();
 
-        GPIO.output(self.__pinA__, GPIO.LOW)
-        GPIO.output(self.__pinB__, GPIO.LOW)
-        GPIO.output(self.__pinC__, GPIO.HIGH)
-        GPIO.output(self.__pinD__, GPIO.LOW)
-        time.sleep(self.timeConstant)
+    tNext = time.time()
 
-        GPIO.output(self.__pinA__, GPIO.LOW)
-        GPIO.output(self.__pinB__, GPIO.HIGH)
-        GPIO.output(self.__pinC__, GPIO.LOW)
-        GPIO.output(self.__pinD__, GPIO.LOW)
-        time.sleep(self.timeConstant)
+    while not mainExit.is_set():
+        tNext += stepperLoopRate
+        if not dataQueue.empty():
+            setPoint = dataQueue.get()
 
-        GPIO.output(self.__pinA__, GPIO.LOW)
-        GPIO.output(self.__pinB__, GPIO.LOW)
-        GPIO.output(self.__pinC__, GPIO.LOW)
-        GPIO.output(self.__pinD__, GPIO.HIGH)
-        time.sleep(self.timeConstant)
+        if currentPoint < setPoint:
+            __stepCW__()
+            currentPoint += 1
+        elif currentPoint > setPoint:
+            __stepCCW__()
+            currentPoint -= 1
+        else:
+            pass
 
-    def __stepCCW__(self):
+        while time.time() <= tNext:
+            time.sleep(stepperLoopRate)
+    GPIO.cleanup()
 
-        GPIO.output(self.__pinA__, GPIO.LOW)
-        GPIO.output(self.__pinB__, GPIO.LOW)
-        GPIO.output(self.__pinC__, GPIO.LOW)
-        GPIO.output(self.__pinD__, GPIO.HIGH)
-        time.sleep(self.timeConstant)
-
-        GPIO.output(self.__pinA__, GPIO.LOW)
-        GPIO.output(self.__pinB__, GPIO.HIGH)
-        GPIO.output(self.__pinC__, GPIO.LOW)
-        GPIO.output(self.__pinD__, GPIO.LOW)
-        time.sleep(self.timeConstant)
-
-        GPIO.output(self.__pinA__, GPIO.LOW)
-        GPIO.output(self.__pinB__, GPIO.LOW)
-        GPIO.output(self.__pinC__, GPIO.HIGH)
-        GPIO.output(self.__pinD__, GPIO.LOW)
-        time.sleep(self.timeConstant)
-
-        GPIO.output(self.__pinA__, GPIO.HIGH)
-        GPIO.output(self.__pinB__, GPIO.LOW)
-        GPIO.output(self.__pinC__, GPIO.LOW)
-        GPIO.output(self.__pinD__, GPIO.LOW)
-        time.sleep(self.timeConstant)
-
-# class StepperFeederClass(threading.Thread):
-#
-#     def __init__(self):
-#         threading.Thread.__init__(self)
-#         self.exitFlag = threading.Event()
-#
-#     def run(self):
-#         global data
-#
-
+def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData):
+    pass
 
 def exitHandler(sig, frame):
-    SPIListener.exitFlag.set()
-    throttleGauge.exitFlag.set()
-    ampGauge.exitFlag.set()
     mainExit.set()
 
 def deleteWindowHandler():
@@ -190,78 +154,92 @@ def matrixMultiply(a, b):
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, exitHandler)
 
-    SPIListener = SPIListenerClass()
+    mainExit = multiprocessing.Event()
+    SPIData = multiprocessing.Queue(maxsize = 2)
+    speedGaugeQueue = multiprocessing.Queue(maxsize = 2)
+    ampGaugeQueue = multiprocessing.Queue(maxsize = 2)
+    processedData = multiprocessing.Queue(maxsize = 2)
+
+    SPIListener = multiprocessing.Process(
+        target = SPIListenerFunction,
+        kwargs = {'dataQueue': SPIData}
+    )
     SPIListener.start()
 
-    throttleGauge = StepperClass(
-        setPoint = 0,
-        pinA = 2,
-        pinB = 3,
-        pinC = 4,
-        pinD = 5,
-        timeConstant = coilTimeConstant)
-    throttleGauge.start()
+    speedGauge = multiprocessing.Process(
+        target = stepperFunction,
+        kwargs = {
+            'dataQueue': speedGaugeQueue,
+            'pinA': 2,
+            'pinB': 3,
+            'pinC': 4,
+            'pinD': 5,
+            'timeConstant': coilTimeConstant
+        }
+    )
+    speedGauge.start()
 
-    ampGauge = StepperClass(
-        setPoint = 0,
-        pinA = 22,
-        pinB = 23,
-        pinC = 24,
-        pinD = 27,
-        timeConstant = coilTimeConstant)
+    ampGauge = multiprocessing.Process(
+        target = stepperFunction,
+        kwargs = {
+            'dataQueue': ampGaugeQueue,
+            'pinA': 22,
+            'pinB': 23,
+            'pinC': 24,
+            'pinD': 27,
+            'timeConstant': coilTimeConstant
+        }
+    )
     ampGauge.start()
+
+    dataManager = multiprocessing.Process(
+        target = dataManagerFunction,
+        kwargs = {
+            'speedGaugeQueue': speedGaugeQueue,
+            'ampGaugeQueue': ampGaugeQueue,
+            'processedData': processedData,
+            'SPIData': SPIData
+        }
+    )
 
     mainWindow = tkinter.Tk(className="gauge")
     mainWindow.attributes("-fullscreen", True)
     mainWindow.config(cursor="none")
     mainWindow.protocol("WM_DELETE_WINDOW", deleteWindowHandler)
-    canvas = tkinter.Canvas(mainWindow, width = 320, height = 240)
-    canvas.pack()
+    gauge = tkinter.Canvas(mainWindow)
+    gauge.place(x = 0, y = 0, relwidth = 0.3, relheight = 0.3)
 
-    # square = [[50, 50], [100, 50], [100, 100]]
-    # squareCentroid = [sum(column) / len(column) for column in list(zip(*square))]
-    #
-    # # convert points to vertical vectors with 1 at the end
-    # squareAugmented = [[[coord] for coord in (*point, 1)] for point in square]
-    #
-    # translateToOrigin = [[1, 0, -squareCentroid[0]], [0, 1, -squareCentroid[1]], [0, 0, 1]]
-    # rotationMatrix = [[math.cos(math.radians(10)), -math.sin(math.radians(10)), 0], [math.sin(math.radians(10)), math.cos(math.radians(10)), 0], [0, 0, 1]]
-    # translateToCentroid = [[1, 0, squareCentroid[0]], [0, 1, squareCentroid[1]], [0, 0, 1]]
-    #
-    # affineMatrix = matrixMultiply(translateToCentroid, matrixMultiply(rotationMatrix, translateToOrigin))
-    #
-    # squareAugmentedRotated = [matrixMultiply(affineMatrix, vector) for vector in squareAugmented]
-    #
-    # squareRotated = [[coord[0] for coord in vector[:2]] for vector in squareAugmentedRotated]
-    #
-    # canvas.create_polygon(*square, fill="red")
-    # canvas.create_polygon(*squareRotated, fill="blue")
+    mainWindow.update_idletasks()
+    mainWindow.update()
 
-    needleCoords = [[0, 240], [160, 230], [160, 250]]
-    needleHinge = [160, 240]
+    needleCoords = [[gauge.winfo_rootx(), gauge.winfo_rooty() + gauge.winfo_height()], [gauge.winfo_rootx() + gauge.winfo_width()/2, gauge.winfo_rooty() + gauge.winfo_height() - 5], [gauge.winfo_rootx() + gauge.winfo_width()/2, gauge.winfo_rooty() + gauge.winfo_height() + 5]]
+    needleHinge = [gauge.winfo_rootx() + gauge.winfo_width()/2, gauge.winfo_rooty() + gauge.winfo_height()]
     needleAngle = 0
+
+    dial = gauge.create_arc(gauge.winfo_rootx(), gauge.winfo_rooty() + (gauge.winfo_height() - gauge.winfo_width()/2), gauge.winfo_rootx() + gauge.winfo_width(), gauge.winfo_rooty() + gauge.winfo_height() + gauge.winfo_width()/2, start = 0, extent = 180, fill = "black")
 
     translateToOrigin = [[1, 0, -needleHinge[0]], [0, 1, -needleHinge[1]], [0, 0, 1]]
     translateToHinge = [[1, 0, needleHinge[0]], [0, 1, needleHinge[1]], [0, 0, 1]]
     rotateCW = [[math.cos(math.radians(1)), -math.sin(math.radians(1)), 0], [math.sin(math.radians(1)), math.cos(math.radians(1)), 0], [0, 0, 1]]
     rotateCCW = [[math.cos(math.radians(-1)), -math.sin(math.radians(-1)), 0], [math.sin(math.radians(-1)), math.cos(math.radians(-1)), 0], [0, 0, 1]]
 
-    dial = canvas.create_arc(0, 80, 320, 400, start = 0, extent = 180, fill = "black")
-    needle = canvas.create_polygon(*needleCoords, fill="red")
+    needle = gauge.create_polygon(*needleCoords, fill="red")
 
     while not mainExit.is_set():
+        if not SPIData.empty():
+            data = SPIData.get()
 
-        with lock:
-            localCopyOfData = data[:]
-
-        potValue = localCopyOfData[5]
+        potValue = data[5]
         setPoint = math.floor((potValue/1023)*180)
 
-        throttlePos = math.floor((potValue/1023)*100)
+        speedPos = math.floor((potValue/1023)*100)
         ampPos = 100 - math.floor((potValue/1023)*100)
 
-        throttleGauge.setPoint = throttlePos
-        ampGauge.setPoint = ampPos
+        try:
+            speedGaugeQueue.put_nowait(speedPos)
+            ampGaugeQueue.put_nowait(ampPos)
+        except:
+            pass
 
         if needleAngle < setPoint:
             affineMatrix = matrixMultiply(translateToHinge, matrixMultiply(rotateCW, translateToOrigin))
@@ -280,7 +258,7 @@ if __name__ == "__main__":
         else:
             pass
 
-        canvas.coords(needle, [coord for point in needleCoords for coord in point])
+        gauge.coords(needle, [coord for point in needleCoords for coord in point])
 
         mainWindow.update_idletasks()
         mainWindow.update()
