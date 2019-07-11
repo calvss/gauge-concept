@@ -10,7 +10,7 @@ import RPi.GPIO as GPIO
 BUFFERSIZE = 20
 
 coilTimeConstant = 0.002 # time each stepper coil is powered
-spiReceiveRate = 0.05 # receive message every 0.1 seconds
+spiReceiveRate = 0.1 # receive message every 0.1 seconds
 
 lock = threading.Lock()
 mainExit = threading.Event()
@@ -54,105 +54,132 @@ class SPIListenerClass(threading.Thread):
                 with lock:
                     data = [((reply[byte + 1] << 8) | reply[byte]) for byte in range(0, BUFFERSIZE, 2)]
 
-            print(data)
+            print(time.time())
             while time.time() <= tNext:
                 pass
         spi.close()
 
 class StepperClass(threading.Thread):
-    def __init__(self):
+    __gpioInitialized__ = False
+    __classInstances__ = 0
+    def __init__(self, setPoint, pinA, pinB, pinC, pinD, timeConstant):
         threading.Thread.__init__(self)
         self.exitFlag = threading.Event()
 
+        if not StepperClass.__gpioInitialized__:
+            GPIO.setmode(GPIO.BCM)
+            StepperClass.__gpioInitialized__ = True
+
+        StepperClass.__classInstances__ += 1
+
+        self.setPoint = setPoint
+        self.__pinA__ = pinA
+        self.__pinB__ = pinB
+        self.__pinC__ = pinC
+        self.__pinD__ = pinD
+        self.timeConstant = timeConstant
+
     def run(self):
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(2, GPIO.OUT)
-        GPIO.setup(3, GPIO.OUT)
-        GPIO.setup(4, GPIO.OUT)
-        GPIO.setup(5, GPIO.OUT)
+        GPIO.setup(self.__pinA__, GPIO.OUT)
+        GPIO.setup(self.__pinB__, GPIO.OUT)
+        GPIO.setup(self.__pinC__, GPIO.OUT)
+        GPIO.setup(self.__pinD__, GPIO.OUT)
 
         currentPoint = 0
 
         #return needle to 0 at the start
-        for __ in range(100):
-            stepCCW();
+        for __ in range(180):
+            self.__stepCCW__();
 
         while not self.exitFlag.is_set():
-            with lock:
-                localCopyOfData = data[:]
-
-            potValue = localCopyOfData[5]
-            setPoint = math.floor((potValue/1023)*100)
-
-            if currentPoint < setPoint:
-                stepCW()
+            if currentPoint < self.setPoint:
+                self.__stepCW__()
                 currentPoint = currentPoint + 1
-            elif currentPoint > setPoint:
-                stepCCW()
+            elif currentPoint > self.setPoint:
+                self.__stepCCW__()
                 currentPoint = currentPoint - 1
             else:
                 pass
 
-        GPIO.cleanup()
+        # decrement number of running stepperClasses
+        StepperClass.__classInstances__ -= 1
 
-def stepCW():
+        # if you're the last class, clean up after youtself
+        if StepperClass.__classInstances__ == 0:
+            GPIO.cleanup()
 
-    GPIO.output(2, GPIO.HIGH)
-    GPIO.output(3, GPIO.LOW)
-    GPIO.output(4, GPIO.LOW)
-    GPIO.output(5, GPIO.LOW)
-    time.sleep(coilTimeConstant)
+    def __stepCW__(self):
 
-    GPIO.output(2, GPIO.LOW)
-    GPIO.output(3, GPIO.LOW)
-    GPIO.output(4, GPIO.HIGH)
-    GPIO.output(5, GPIO.LOW)
-    time.sleep(coilTimeConstant)
+        GPIO.output(self.__pinA__, GPIO.HIGH)
+        GPIO.output(self.__pinB__, GPIO.LOW)
+        GPIO.output(self.__pinC__, GPIO.LOW)
+        GPIO.output(self.__pinD__, GPIO.LOW)
+        time.sleep(self.timeConstant)
 
-    GPIO.output(2, GPIO.LOW)
-    GPIO.output(3, GPIO.HIGH)
-    GPIO.output(4, GPIO.LOW)
-    GPIO.output(5, GPIO.LOW)
-    time.sleep(coilTimeConstant)
+        GPIO.output(self.__pinA__, GPIO.LOW)
+        GPIO.output(self.__pinB__, GPIO.LOW)
+        GPIO.output(self.__pinC__, GPIO.HIGH)
+        GPIO.output(self.__pinD__, GPIO.LOW)
+        time.sleep(self.timeConstant)
 
-    GPIO.output(2, GPIO.LOW)
-    GPIO.output(3, GPIO.LOW)
-    GPIO.output(4, GPIO.LOW)
-    GPIO.output(5, GPIO.HIGH)
-    time.sleep(coilTimeConstant)
+        GPIO.output(self.__pinA__, GPIO.LOW)
+        GPIO.output(self.__pinB__, GPIO.HIGH)
+        GPIO.output(self.__pinC__, GPIO.LOW)
+        GPIO.output(self.__pinD__, GPIO.LOW)
+        time.sleep(self.timeConstant)
 
-def stepCCW():
+        GPIO.output(self.__pinA__, GPIO.LOW)
+        GPIO.output(self.__pinB__, GPIO.LOW)
+        GPIO.output(self.__pinC__, GPIO.LOW)
+        GPIO.output(self.__pinD__, GPIO.HIGH)
+        time.sleep(self.timeConstant)
 
-    GPIO.output(2, GPIO.LOW)
-    GPIO.output(3, GPIO.LOW)
-    GPIO.output(4, GPIO.LOW)
-    GPIO.output(5, GPIO.HIGH)
-    time.sleep(coilTimeConstant)
+    def __stepCCW__(self):
 
-    GPIO.output(2, GPIO.LOW)
-    GPIO.output(3, GPIO.HIGH)
-    GPIO.output(4, GPIO.LOW)
-    GPIO.output(5, GPIO.LOW)
-    time.sleep(coilTimeConstant)
+        GPIO.output(self.__pinA__, GPIO.LOW)
+        GPIO.output(self.__pinB__, GPIO.LOW)
+        GPIO.output(self.__pinC__, GPIO.LOW)
+        GPIO.output(self.__pinD__, GPIO.HIGH)
+        time.sleep(self.timeConstant)
 
-    GPIO.output(2, GPIO.LOW)
-    GPIO.output(3, GPIO.LOW)
-    GPIO.output(4, GPIO.HIGH)
-    GPIO.output(5, GPIO.LOW)
-    time.sleep(coilTimeConstant)
+        GPIO.output(self.__pinA__, GPIO.LOW)
+        GPIO.output(self.__pinB__, GPIO.HIGH)
+        GPIO.output(self.__pinC__, GPIO.LOW)
+        GPIO.output(self.__pinD__, GPIO.LOW)
+        time.sleep(self.timeConstant)
 
-    GPIO.output(2, GPIO.HIGH)
-    GPIO.output(3, GPIO.LOW)
-    GPIO.output(4, GPIO.LOW)
-    GPIO.output(5, GPIO.LOW)
-    time.sleep(coilTimeConstant)
+        GPIO.output(self.__pinA__, GPIO.LOW)
+        GPIO.output(self.__pinB__, GPIO.LOW)
+        GPIO.output(self.__pinC__, GPIO.HIGH)
+        GPIO.output(self.__pinD__, GPIO.LOW)
+        time.sleep(self.timeConstant)
 
-def signalHandler(sig, frame):
+        GPIO.output(self.__pinA__, GPIO.HIGH)
+        GPIO.output(self.__pinB__, GPIO.LOW)
+        GPIO.output(self.__pinC__, GPIO.LOW)
+        GPIO.output(self.__pinD__, GPIO.LOW)
+        time.sleep(self.timeConstant)
+
+# class StepperFeederClass(threading.Thread):
+#
+#     def __init__(self):
+#         threading.Thread.__init__(self)
+#         self.exitFlag = threading.Event()
+#
+#     def run(self):
+#         global data
+#
+
+
+def exitHandler(sig, frame):
     SPIListener.exitFlag.set()
-    Stepper.exitFlag.set()
+    throttleGauge.exitFlag.set()
+    ampGauge.exitFlag.set()
     mainExit.set()
 
 def deleteWindowHandler():
+    # when window close button is clicked, send SIGINT to yourself
+    # this lets the exitHandler function kill the threads properly
     os.kill(os.getpid(), signal.SIGINT)
 
 def matrixMultiply(a, b):
@@ -161,17 +188,34 @@ def matrixMultiply(a, b):
     return [[sum(ele_a*ele_b for ele_a, ele_b in zip(row_a, col_b)) for col_b in zip_b] for row_a in a]
 
 if __name__ == "__main__":
-    signal.signal(signal.SIGINT, signalHandler)
+    signal.signal(signal.SIGINT, exitHandler)
 
     SPIListener = SPIListenerClass()
     SPIListener.start()
 
-    Stepper = StepperClass()
-    Stepper.start()
+    throttleGauge = StepperClass(
+        setPoint = 0,
+        pinA = 2,
+        pinB = 3,
+        pinC = 4,
+        pinD = 5,
+        timeConstant = coilTimeConstant)
+    throttleGauge.start()
+
+    ampGauge = StepperClass(
+        setPoint = 0,
+        pinA = 22,
+        pinB = 23,
+        pinC = 24,
+        pinD = 27,
+        timeConstant = coilTimeConstant)
+    ampGauge.start()
 
     mainWindow = tkinter.Tk(className="gauge")
+    mainWindow.attributes("-fullscreen", True)
+    mainWindow.config(cursor="none")
     mainWindow.protocol("WM_DELETE_WINDOW", deleteWindowHandler)
-    canvas = tkinter.Canvas(mainWindow, width = 200, height = 200)
+    canvas = tkinter.Canvas(mainWindow, width = 320, height = 240)
     canvas.pack()
 
     # square = [[50, 50], [100, 50], [100, 100]]
@@ -193,8 +237,8 @@ if __name__ == "__main__":
     # canvas.create_polygon(*square, fill="red")
     # canvas.create_polygon(*squareRotated, fill="blue")
 
-    needleCoords = [[0, 200], [100, 190], [100, 210]]
-    needleHinge = [100, 200]
+    needleCoords = [[0, 240], [160, 230], [160, 250]]
+    needleHinge = [160, 240]
     needleAngle = 0
 
     translateToOrigin = [[1, 0, -needleHinge[0]], [0, 1, -needleHinge[1]], [0, 0, 1]]
@@ -202,7 +246,7 @@ if __name__ == "__main__":
     rotateCW = [[math.cos(math.radians(1)), -math.sin(math.radians(1)), 0], [math.sin(math.radians(1)), math.cos(math.radians(1)), 0], [0, 0, 1]]
     rotateCCW = [[math.cos(math.radians(-1)), -math.sin(math.radians(-1)), 0], [math.sin(math.radians(-1)), math.cos(math.radians(-1)), 0], [0, 0, 1]]
 
-    dial = canvas.create_arc(0, 200, 100, 200, start = 0, extent = 180, fill = "black")
+    dial = canvas.create_arc(0, 80, 320, 400, start = 0, extent = 180, fill = "black")
     needle = canvas.create_polygon(*needleCoords, fill="red")
 
     while not mainExit.is_set():
@@ -212,6 +256,12 @@ if __name__ == "__main__":
 
         potValue = localCopyOfData[5]
         setPoint = math.floor((potValue/1023)*180)
+
+        throttlePos = math.floor((potValue/1023)*100)
+        ampPos = 100 - math.floor((potValue/1023)*100)
+
+        throttleGauge.setPoint = throttlePos
+        ampGauge.setPoint = ampPos
 
         if needleAngle < setPoint:
             affineMatrix = matrixMultiply(translateToHinge, matrixMultiply(rotateCW, translateToOrigin))
