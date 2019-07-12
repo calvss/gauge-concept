@@ -13,6 +13,11 @@ coilTimeConstant = 0.002 # time each stepper coil is powered
 spiReceiveRate = 0.1 # receive message every 0.1 seconds
 stepperLoopRate = 0.01 # step motors every 0.01 seconds
 
+labelHeaderSize = 10
+labelDataSize = 14
+
+startupTime = time.time()
+
 def SPIListenerFunction(dataQueue):
     spi = spidev.SpiDev()
     spi.open(1, 0)
@@ -42,7 +47,7 @@ def SPIListenerFunction(dataQueue):
             data = [((reply[byte + 1] << 8) | reply[byte]) for byte in range(0, BUFFERSIZE, 2)]
 
         data.append(time.time())
-        print(data[-1])
+        #print(data[-1])
 
         dataQueue.put(data)
 
@@ -136,7 +141,12 @@ def stepperFunction(dataQueue, pinA, pinB, pinC, pinD, timeConstant):
     GPIO.cleanup()
 
 def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData):
-    pass
+    while not mainExit.is_set():
+        try:
+            data = SPIData.get(block = True, timeout = 0.2)
+            processedData.put(data, block = True, timeout = 0.2)
+        except:
+            pass
 
 def exitHandler(sig, frame):
     mainExit.set()
@@ -201,13 +211,53 @@ if __name__ == "__main__":
             'SPIData': SPIData
         }
     )
+    dataManager.start()
 
     mainWindow = tkinter.Tk(className="gauge")
     mainWindow.attributes("-fullscreen", True)
     mainWindow.config(cursor="none")
     mainWindow.protocol("WM_DELETE_WINDOW", deleteWindowHandler)
-    gauge = tkinter.Canvas(mainWindow)
-    gauge.place(x = 0, y = 0, relwidth = 0.3, relheight = 0.3)
+    gauge = tkinter.Canvas(mainWindow, width = 120, height = 60)
+    gauge.grid(row = 0, column = 0, columnspan = 2)
+
+    tkinter.Label(mainWindow, text="Time", font=("Courier", labelHeaderSize)).grid(row = 2, column = 0)
+    tkinter.Label(mainWindow, text="Volt", font=("Courier", labelHeaderSize)).grid(row = 2, column = 1)
+    tkinter.Label(mainWindow, text="Amp", font=("Courier", labelHeaderSize)).grid(row = 2, column = 2)
+    tkinter.Label(mainWindow, text="Throttle", font=("Courier", labelHeaderSize)).grid(row = 2, column = 3)
+
+    timeLabel = tkinter.Label(mainWindow, text=".", font=("Courier", labelDataSize))
+    voltLabel = tkinter.Label(mainWindow, text=".", font=("Courier", labelDataSize))
+    ampLabel = tkinter.Label(mainWindow, text=".", font=("Courier", labelDataSize))
+    throttleLabel = tkinter.Label(mainWindow, text=".", font=("Courier", labelDataSize))
+    timeLabel.grid(row = 3, column = 0)
+    voltLabel.grid(row = 3, column = 1)
+    ampLabel.grid(row = 3, column = 2)
+    throttleLabel.grid(row = 3, column = 3)
+
+    tkinter.Label(mainWindow, text="Speed", font=("Courier", labelHeaderSize)).grid(row = 4, column = 0)
+    tkinter.Label(mainWindow, text="Distance", font=("Courier", labelHeaderSize)).grid(row = 4, column = 1)
+    tkinter.Label(mainWindow, text="FWD", font=("Courier", labelHeaderSize)).grid(row = 4, column = 2)
+    tkinter.Label(mainWindow, text="REV", font=("Courier", labelHeaderSize)).grid(row = 4, column = 3)
+
+    speedLabel = tkinter.Label(mainWindow, text=".", font=("Courier", labelDataSize))
+    distanceLabel = tkinter.Label(mainWindow, text=".", font=("Courier", labelDataSize))
+    fwdLabel = tkinter.Label(mainWindow, text=".", font=("Courier", labelDataSize))
+    revLabel = tkinter.Label(mainWindow, text=".", font=("Courier", labelDataSize))
+    speedLabel.grid(row = 5, column = 0)
+    distanceLabel.grid(row = 5, column = 1)
+    fwdLabel.grid(row = 5, column = 2)
+    revLabel.grid(row = 5, column = 3)
+
+    tkinter.Label(mainWindow, text="Power", font=("Courier", labelHeaderSize)).grid(row = 6, column = 0)
+    tkinter.Label(mainWindow, text="MCPow", font=("Courier", labelHeaderSize)).grid(row = 6, column = 1)
+    tkinter.Label(mainWindow, text="Tic", font=("Courier", labelHeaderSize)).grid(row = 6, column = 2)
+
+    powerLabel = tkinter.Label(mainWindow, text=".", font=("Courier", labelDataSize))
+    mcpowLabel = tkinter.Label(mainWindow, text=".", font=("Courier", labelDataSize))
+    ticLabel = tkinter.Label(mainWindow, text=".", font=("Courier", labelDataSize))
+    powerLabel.grid(row = 7, column = 0)
+    mcpowLabel.grid(row = 7, column = 1)
+    ticLabel.grid(row = 7, column = 2)
 
     mainWindow.update_idletasks()
     mainWindow.update()
@@ -226,8 +276,21 @@ if __name__ == "__main__":
     needle = gauge.create_polygon(*needleCoords, fill="red")
 
     while not mainExit.is_set():
-        if not SPIData.empty():
-            data = SPIData.get()
+        if not processedData.empty():
+            print(time.time())
+            data = processedData.get()
+
+        timeLabel.config(text=str(time.time() - startupTime)[:4])
+        voltLabel.config(text=str(data[4])[:4])
+        ampLabel.config(text=str(data[7])[:4])
+        throttleLabel.config(text=str(data[5])[:4])
+        speedLabel.config(text=str(data[3])[:4])
+        distanceLabel.config(text="0")
+        fwdLabel.config(text=str(data[2])[:4])
+        revLabel.config(text=str(data[1])[:4])
+        powerLabel.config(text="0")
+        mcpowLabel.config(text=str(data[6])[:4])
+        ticLabel.config(text=str(data[0])[:4].rjust(4))
 
         potValue = data[5]
         setPoint = math.floor((potValue/1023)*180)
