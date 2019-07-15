@@ -6,6 +6,7 @@ import multiprocessing
 import math
 import tkinter
 import RPi.GPIO as GPIO
+import csv
 
 BUFFERSIZE = 20
 
@@ -19,6 +20,19 @@ labelDataSize = 14
 startupTime = time.time()
 
 def SPIListenerFunction(dataQueue):
+    # dataQueue message format:
+    #   [0] tic
+    #   [1] rev
+    #   [2] fwd
+    #   [3] spd
+    #   [4] vlt
+    #   [5] thr
+    #   [6] pow
+    #   [7] cur
+    #   [8] tmp
+    #   [9] STOP WORD (0xAAAA)
+    #   [10] timestamp
+
     spi = spidev.SpiDev()
     spi.open(1, 0)
     spi.max_speed_hz = 15200
@@ -140,13 +154,49 @@ def stepperFunction(dataQueue, pinA, pinB, pinC, pinD, timeConstant):
             time.sleep(stepperLoopRate)
     GPIO.cleanup()
 
-def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData):
+def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData, logData):
+    previousTime = startupTime
     while not mainExit.is_set():
+        ## TODO: calculate data and convert to proper units
         try:
-            data = SPIData.get(block = True, timeout = 0.2)
-            processedData.put(data, block = True, timeout = 0.2)
+            data = SPIData.get_nowait()
         except:
             pass
+        # Timestamps attached to each message
+        # time in seconds
+        currentTime = data[-1]
+        timeElapsed = currentTime - previousTime
+        previousTime = currentTime
+
+        rawThrottle = data[5]
+
+        # throttle signal is from 0V-4.7V, dividered between 1k and 100k
+        # datalogger ADC maps 0V-5V to 0-1023
+        throttlePct = clamp((((rawThrottle/1023) * 5) / 4), 0, 1)
+
+        data[5] = throttlePct
+
+        try:
+            processedData.put_nowait()
+        except:
+            pass
+
+        try:
+            logData.put(data, block = True, timeout = 0.1)
+        except:
+            print("slow SD card")
+
+def fileWriter(dataQueue):
+    with open('logfile.txt', 'w+') as logFile:
+        writer = csv.writer(logFile, dialect = 'excel')
+        while not mainExit.is_set():
+            data = []
+            while not dataQueue.empty():
+                data.append(dataQueue.get_nowait())
+
+            for log in data:
+                writer.writerow(row)
+
 
 def exitHandler(sig, frame):
     mainExit.set()
@@ -161,6 +211,9 @@ def matrixMultiply(a, b):
     zip_b = list(zip_b)
     return [[sum(ele_a*ele_b for ele_a, ele_b in zip(row_a, col_b)) for col_b in zip_b] for row_a in a]
 
+def clamp(n, minn, maxn):
+    return max(min(maxn, n), minn)
+
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, exitHandler)
 
@@ -169,6 +222,7 @@ if __name__ == "__main__":
     speedGaugeQueue = multiprocessing.Queue(maxsize = 2)
     ampGaugeQueue = multiprocessing.Queue(maxsize = 2)
     processedData = multiprocessing.Queue(maxsize = 2)
+    logData = multiprocessing.Queue(maxsize = 15)
 
     SPIListener = multiprocessing.Process(
         target = SPIListenerFunction,
@@ -208,7 +262,8 @@ if __name__ == "__main__":
             'speedGaugeQueue': speedGaugeQueue,
             'ampGaugeQueue': ampGaugeQueue,
             'processedData': processedData,
-            'SPIData': SPIData
+            'SPIData': SPIData,
+            'logData': logData
         }
     )
     dataManager.start()
@@ -283,7 +338,7 @@ if __name__ == "__main__":
         timeLabel.config(text=str(time.time() - startupTime)[:4])
         voltLabel.config(text=str(data[4])[:4])
         ampLabel.config(text=str(data[7])[:4])
-        throttleLabel.config(text=str(data[5])[:4])
+        throttleLabel.config(text=str(data[5]*100)[:3] + "%")
         speedLabel.config(text=str(data[3])[:4])
         distanceLabel.config(text="0")
         fwdLabel.config(text=str(data[2])[:4])
@@ -292,11 +347,11 @@ if __name__ == "__main__":
         mcpowLabel.config(text=str(data[6])[:4])
         ticLabel.config(text=str(data[0])[:4].rjust(4))
 
-        potValue = data[5]
-        setPoint = math.floor((potValue/1023)*180)
+        throttlePct = data[5]
+        setPoint = math.floor(throttlePct*180)
 
-        speedPos = math.floor((potValue/1023)*100)
-        ampPos = 100 - math.floor((potValue/1023)*100)
+        speedPos = math.floor(throttlePct*100)
+        ampPos = 100 - math.floor(throttlePct*100)
 
         try:
             speedGaugeQueue.put_nowait(speedPos)
