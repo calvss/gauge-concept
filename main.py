@@ -17,9 +17,13 @@ stepperLoopRate = 0.01 # step motors every 0.01 seconds
 labelHeaderSize = 10
 labelDataSize = 14
 
+pulseToSpd = 0.5171692
+pulseToKm = pulseToSpd*2/36000
+
 startupTime = time.time()
 
 def SPIListenerFunction(dataQueue):
+
     # dataQueue message format:
     #   [0] tic
     #   [1] rev
@@ -156,38 +160,68 @@ def stepperFunction(dataQueue, pinA, pinB, pinC, pinD, timeConstant):
 
 def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData, logData):
     previousTime = startupTime
+
+    odoCount = float(0.0)
+    speedCount = 0
+    speedCountDelta = 0
+
     while not mainExit.is_set():
         ## TODO: calculate data and convert to proper units
-        try:
-            data = SPIData.get_nowait()
-        except:
-            pass
-        # Timestamps attached to each message
-        # time in seconds
-        currentTime = data[-1]
-        timeElapsed = currentTime - previousTime
-        previousTime = currentTime
+        if not SPIData.empty():
+            rawData = SPIData.get_nowait()
+            data = rawData
+            # Timestamps attached to each message
+            # time in seconds
+            currentTime = rawData[-1]
+            timeElapsed = currentTime - previousTime
+            previousTime = currentTime
 
-        rawThrottle = data[5]
+            rawThrottle = rawData[5]
 
-        # throttle signal is from 0V-4.7V, dividered between 1k and 100k
-        # datalogger ADC maps 0V-5V to 0-1023
-        throttlePct = clamp((((rawThrottle/1023) * 5) / 4), 0, 1)
+            # throttle signal is from 0V-4.7V, dividered between 1k and 100k
+            # datalogger ADC maps 0V-5V to 0-1023
+            throttlePct = clamp((((rawThrottle/1023) * 5) / 4), 0, 1)
 
-        data[5] = throttlePct
+            # speed calculation
+            speedCount = rawData[3]
+            speedCount = (speedCount + speedCountDelta)/2 # filtering
+            speed = speedCount * pulseToSpd # kph
+            odoCount += speedCount * pulseToKm # km
+            speedCountDelta = speedCount
 
-        try:
-            processedData.put_nowait()
-        except:
-            pass
+            # current calculation
+            rawCurrent = rawData[7]
+            current = ((rawCurrent/204.6)*(1.001)-(327/204.6))*(200/1.25)
 
-        try:
-            logData.put(data, block = True, timeout = 0.1)
-        except:
-            print("slow SD card")
+            data[3] = speed
+            data[5] = throttlePct
+            data[7] = current
 
-def fileWriter(dataQueue):
-    with open('logfile.txt', 'w+') as logFile:
+            # 106 steps in the dial
+            speedPos = math.floor((speed / 80)*109)
+            ampPos = 109 - math.floor((current/220)*109)
+            # print(current, ampPos)
+
+            try:
+                speedGaugeQueue.put_nowait(speedPos)
+                ampGaugeQueue.put_nowait(ampPos)
+            except:
+                pass
+
+            try:
+                processedData.put_nowait(data)
+            except:
+                pass
+
+            try:
+                logData.put(rawData, block = True, timeout = 0.1)
+            except:
+                print("slow SD card")
+
+def fileWriterFunction(dataQueue):
+    timeCreated = time.asctime().replace(" ", ".").replace(":", ".")
+    dir = "/home/pi/gauge/Pot Gauge/"
+    with open(dir + timeCreated + ".txt", 'w+') as logFile:
         writer = csv.writer(logFile, dialect = 'excel')
         while not mainExit.is_set():
             data = []
@@ -195,6 +229,10 @@ def fileWriter(dataQueue):
                 data.append(dataQueue.get_nowait())
 
             for log in data:
+                # [-3::-1] means "everything except the last 2 items, in reverse order"
+                # last 2 items are stopword and timestamp
+                # [-1] is the last item
+                row = log[-3::-1] + [log[-1]]
                 writer.writerow(row)
 
 
@@ -267,6 +305,14 @@ if __name__ == "__main__":
         }
     )
     dataManager.start()
+
+    fileWriter = multiprocessing.Process(
+        target = fileWriterFunction,
+        kwargs = {
+            'dataQueue': logData
+        }
+    )
+    fileWriter.start()
 
     mainWindow = tkinter.Tk(className="gauge")
     mainWindow.attributes("-fullscreen", True)
@@ -348,16 +394,8 @@ if __name__ == "__main__":
         ticLabel.config(text=str(data[0])[:4].rjust(4))
 
         throttlePct = data[5]
+
         setPoint = math.floor(throttlePct*180)
-
-        speedPos = math.floor(throttlePct*100)
-        ampPos = 100 - math.floor(throttlePct*100)
-
-        try:
-            speedGaugeQueue.put_nowait(speedPos)
-            ampGaugeQueue.put_nowait(ampPos)
-        except:
-            pass
 
         if needleAngle < setPoint:
             affineMatrix = matrixMultiply(translateToHinge, matrixMultiply(rotateCW, translateToOrigin))
