@@ -8,3 +8,5 @@
 * math
 * tkinter
 * RPi.GPIO
+* csv
+* collections.deque
