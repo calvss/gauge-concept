@@ -7,6 +7,7 @@ import math
 import tkinter
 import RPi.GPIO as GPIO
 import csv
+from collections import deque
 
 BUFFERSIZE = 20
 
@@ -162,8 +163,7 @@ def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData, 
     previousTime = startupTime
 
     odoCount = float(0.0)
-    speedCount = 0
-    speedCountDelta = 0
+    speedData = deque(maxlen = 10)
 
     while not mainExit.is_set():
         ## TODO: calculate data and convert to proper units
@@ -184,17 +184,32 @@ def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData, 
 
             # speed calculation
             speedCount = rawData[3]
-            speedCount = (speedCount + speedCountDelta)/2 # filtering
-            speed = speedCount * pulseToSpd # kph
+            speedData.append(speedCount)
+
+            speedSum = 0
+            for item in speedData:
+                speedSum += item
+            speedAverage = speedSum/len(speedData)
+
+            speed = speedAverage * pulseToSpd # kph
             odoCount += speedCount * pulseToKm # km
-            speedCountDelta = speedCount
 
             # current calculation
             rawCurrent = rawData[7]
             current = ((rawCurrent/204.6)*(1.001)-(327/204.6))*(200/1.25)
 
+            # volts calculation
+            rawVolt = rawData[4]
+            volt = rawVolt*0.404 - 20.582
+
+            #pow calculation
+            rawPow = rawData[6]
+            pow = rawPow*(0.158371)
+
             data[3] = speed
+            data[4] = volt
             data[5] = throttlePct
+            data[6] = pow
             data[7] = current
 
             # 106 steps in the dial
@@ -223,6 +238,7 @@ def fileWriterFunction(dataQueue):
     dir = "/home/pi/gauge/Pot Gauge/"
     with open(dir + timeCreated + ".txt", 'w+') as logFile:
         writer = csv.writer(logFile, dialect = 'excel')
+        logFile.write("temp, current, pow, throttle, volt, speed, fwd, rev, tic, timestamp\r\n")
         while not mainExit.is_set():
             data = []
             while not dataQueue.empty():
