@@ -164,7 +164,7 @@ def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData, 
     previousTime = startupTime
 
     odoCount = float(0.0)
-    speedData = deque(maxlen = 10)
+    speedData = deque([0], maxlen = 10)
 
     while not mainExit.is_set():
         ## TODO: calculate data and convert to proper units
@@ -189,7 +189,7 @@ def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData, 
             # make sure that extreme values due to noise is not included
             # cap speed to 80 kph
             # cap acceleration to 10 m/s2
-            dv = (abs(speedCount - speedData[-1]) * pulseToSpd) / 3.6 # kpm to m/s
+            dv = (abs(speedCount - speedData[-1]) * pulseToSpd) / 3.6 # kph to m/s
             acceleration = dv / timeElapsed
 
             if (speedCount * pulseToSpd) < 80 and acceleration < 10:
@@ -227,13 +227,13 @@ def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData, 
             # print(current, ampPos)
 
             try:
-                speedGaugeQueue.put_nowait(speedPos)
-                ampGaugeQueue.put_nowait(ampPos)
+                processedData.put_nowait(data)
             except:
                 pass
 
             try:
-                processedData.put_nowait(data)
+                speedGaugeQueue.put_nowait(speedPos)
+                ampGaugeQueue.put_nowait(ampPos)
             except:
                 pass
 
@@ -248,6 +248,8 @@ def fileWriterFunction(dataQueue):
     logFileName = dir + timeCreated + ".txt"
 
     # initially create empty files for backup purposes
+    with open(logFileName, 'w') as logfile:
+        logFile.write("temp,current,pow,throttle,volt,speed,fwd,rev,tic,timestamp\r\n")
     open(logFileName + ".backup", 'w').close()
     open(logFileName + ".backup2", 'w').close()
 
