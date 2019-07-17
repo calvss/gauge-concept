@@ -7,6 +7,7 @@ import math
 import tkinter
 import RPi.GPIO as GPIO
 import csv
+import shutil
 from collections import deque
 
 BUFFERSIZE = 20
@@ -184,7 +185,15 @@ def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData, 
 
             # speed calculation
             speedCount = rawData[3]
-            speedData.append(speedCount)
+
+            # make sure that extreme values due to noise is not included
+            # cap speed to 80 kph
+            # cap acceleration to 10 m/s2
+            dv = (abs(speedCount - speedData[-1]) * pulseToSpd) / 3.6 # kpm to m/s
+            acceleration = dv / timeElapsed
+
+            if (speedCount * pulseToSpd) < 80 and acceleration < 10:
+                speedData.append(speedCount)
 
             speedSum = 0
             for item in speedData:
@@ -196,7 +205,7 @@ def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData, 
 
             # current calculation
             rawCurrent = rawData[7]
-            current = ((rawCurrent/204.6)*(1.001)-(327/204.6))*(200/1.25)
+            current = clamp(((rawCurrent/204.6)*(1.001)-(327/204.6))*(200/1.25), 0, 220)
 
             # volts calculation
             rawVolt = rawData[4]
@@ -236,20 +245,56 @@ def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData, 
 def fileWriterFunction(dataQueue):
     timeCreated = time.asctime().replace(" ", ".").replace(":", ".")
     dir = "/home/pi/gauge/Pot Gauge/"
-    with open(dir + timeCreated + ".txt", 'w+') as logFile:
-        writer = csv.writer(logFile, dialect = 'excel')
-        logFile.write("temp, current, pow, throttle, volt, speed, fwd, rev, tic, timestamp\r\n")
-        while not mainExit.is_set():
-            data = []
-            while not dataQueue.empty():
-                data.append(dataQueue.get_nowait())
+    logFileName = dir + timeCreated + ".txt"
 
-            for log in data:
-                # [-3::-1] means "everything except the last 2 items, in reverse order"
-                # last 2 items are stopword and timestamp
-                # [-1] is the last item
-                row = log[-3::-1] + [log[-1]]
-                writer.writerow(row)
+    # initially create empty files for backup purposes
+    open(logFileName + ".backup", 'w').close()
+    open(logFileName + ".backup2", 'w').close()
+
+    while not mainExit.is_set():
+        # switch backup of logfile every 100 entries
+        # maintain 3 logfiles at all times
+        for __ in range(100):
+            with open(logFileName, 'a') as logFile:
+                writer = csv.writer(logFile, dialect = 'excel')
+
+                data = []
+
+                while not dataQueue.empty():
+                    data.append(dataQueue.get_nowait())
+
+                for log in data:
+                    # [-3::-1] means "everything except the last 2 items, in reverse order"
+                    # last 2 items are stopword and timestamp
+                    # [-1] is the last item
+                    row = log[-3::-1] + [log[-1]]
+                    writer.writerow(row)
+
+        # shutil.copy2 preserves metadata unlike shutil.copy
+        shutil.copy2(src = logFileName + ".backup", dst = logFileName + ".backup2")
+        shutil.copy2(src = logFileName, dst = logFileName + ".backup")
+        # os.replace(src = logFileName + ".backup", dst = logFileName + ".backup2")
+        # os.replace(src = logFileName, dst = logFileName + ".backup")
+    # timeCreated = time.time
+    # timeString = time.asctime().replace(" ", ".").replace(":", ".")
+    # dir = "/home/pi/gauge/Pot Gauge/"
+    #
+    # with open(dir + timeCreated + ".txt", 'a+') as logFile:
+    #     logFile.write("temp,current,pow,throttle,volt,speed,fwd,rev,tic,timestamp\r\n")
+    # with open(dir + timeCreated + ".txt", 'w+') as logFile:
+    #     writer = csv.writer(logFile, dialect = 'excel')
+    #     logFile.write("temp, current, pow, throttle, volt, speed, fwd, rev, tic, timestamp\r\n")
+    #     while not mainExit.is_set():
+    #         data = []
+    #         while not dataQueue.empty():
+    #             data.append(dataQueue.get_nowait())
+    #
+    #         for log in data:
+    #             # [-3::-1] means "everything except the last 2 items, in reverse order"
+    #             # last 2 items are stopword and timestamp
+    #             # [-1] is the last item
+    #             row = log[-3::-1] + [log[-1]]
+    #             writer.writerow(row)
 
 
 def exitHandler(sig, frame):
@@ -276,7 +321,7 @@ if __name__ == "__main__":
     speedGaugeQueue = multiprocessing.Queue(maxsize = 2)
     ampGaugeQueue = multiprocessing.Queue(maxsize = 2)
     processedData = multiprocessing.Queue(maxsize = 2)
-    logData = multiprocessing.Queue(maxsize = 15)
+    logData = multiprocessing.Queue(maxsize = 20)
 
     SPIListener = multiprocessing.Process(
         target = SPIListenerFunction,
