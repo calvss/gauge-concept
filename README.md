@@ -9,6 +9,7 @@
 * tkinter
 * RPi.GPIO
 * csv
+* shutil
 * collections.deque
 
 # NOTE:
