@@ -14,7 +14,9 @@ BUFFERSIZE = 20
 
 coilTimeConstant = 0.002 # time each stepper coil is powered
 spiReceiveRate = 0.1 # receive message every 0.1 seconds
-stepperLoopRate = 0.01 # step motors every 0.01 seconds
+stepperLoopRate = 0.02 # step motors every 0.01 seconds
+screenRefreshRate = 0.02 # refresh screen every 0.02 seconds
+fileWriterRate = 1 # save to disk every second
 
 labelHeaderSize = 10
 labelDataSize = 14
@@ -253,7 +255,9 @@ def fileWriterFunction(dataQueue):
     open(logFileName + ".backup", 'w').close()
     open(logFileName + ".backup2", 'w').close()
 
+    tNext = time.time()
     while not mainExit.is_set():
+        tNext += fileWriterRate
         # switch backup of logfile every 100 entries
         # maintain 3 logfiles at all times
         for __ in range(100):
@@ -275,6 +279,9 @@ def fileWriterFunction(dataQueue):
         # shutil.copy2 preserves metadata unlike shutil.copy
         shutil.copy2(src = logFileName + ".backup", dst = logFileName + ".backup2")
         shutil.copy2(src = logFileName, dst = logFileName + ".backup")
+
+        while time.time() <= tNext:
+            time.sleep(0.5)
         # os.replace(src = logFileName + ".backup", dst = logFileName + ".backup2")
         # os.replace(src = logFileName, dst = logFileName + ".backup")
     # timeCreated = time.time
@@ -439,7 +446,10 @@ if __name__ == "__main__":
 
     needle = gauge.create_polygon(*needleCoords, fill="red")
 
+    tNext = time.time()
     while not mainExit.is_set():
+        tNext += screenRefreshRate
+
         if not processedData.empty():
             print(time.time())
             data = processedData.get()
@@ -481,3 +491,6 @@ if __name__ == "__main__":
 
         mainWindow.update_idletasks()
         mainWindow.update()
+
+        while time.time() <= tNext:
+            pass
