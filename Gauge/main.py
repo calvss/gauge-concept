@@ -244,11 +244,11 @@ def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData, 
 
 def fileWriterFunction(dataQueue):
     timeCreated = time.asctime().replace(" ", ".").replace(":", ".")
-    dir = "/home/pi/gauge/Pot Gauge/"
+    dir = "/home/pi/gauge/"
     logFileName = dir + timeCreated + ".txt"
 
     # initially create empty files for backup purposes
-    with open(logFileName, 'w') as logfile:
+    with open(logFileName, 'w') as logFile:
         logFile.write("temp,current,pow,throttle,volt,speed,fwd,rev,tic,timestamp\r\n")
     open(logFileName + ".backup", 'w').close()
     open(logFileName + ".backup2", 'w').close()
