@@ -15,8 +15,9 @@ BUFFERSIZE = 20
 coilTimeConstant = 0.002 # time each stepper coil is powered
 spiReceiveRate = 0.1 # receive message every 0.1 seconds
 stepperLoopRate = 0.02 # step motors every 0.01 seconds
-screenRefreshRate = 0.02 # refresh screen every 0.02 seconds
+screenRefreshRate = 0.01 # refresh screen every 0.01 seconds
 fileWriterRate = 1 # save to disk every second
+dataManagerRate = 0.05
 
 labelHeaderSize = 10
 labelDataSize = 14
@@ -74,7 +75,7 @@ def SPIListenerFunction(dataQueue):
         dataQueue.put(data)
 
         while time.time() <= tNext:
-            pass
+            time.sleep(0.001)
     spi.close()
 
 def stepperFunction(dataQueue, pinA, pinB, pinC, pinD, timeConstant):
@@ -89,8 +90,8 @@ def stepperFunction(dataQueue, pinA, pinB, pinC, pinD, timeConstant):
 
     def __stepCW__():
 
-        GPIO.output(pinB, GPIO.LOW)
         GPIO.output(pinA, GPIO.HIGH)
+        GPIO.output(pinB, GPIO.LOW)
         GPIO.output(pinC, GPIO.LOW)
         GPIO.output(pinD, GPIO.LOW)
         time.sleep(timeConstant)
@@ -159,7 +160,7 @@ def stepperFunction(dataQueue, pinA, pinB, pinC, pinD, timeConstant):
             pass
 
         while time.time() <= tNext:
-            time.sleep(stepperLoopRate)
+            time.sleep(stepperLoopRate/2)
     GPIO.cleanup()
 
 def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData, logData):
@@ -168,7 +169,9 @@ def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData, 
     odoCount = float(0.0)
     speedData = deque([0], maxlen = 10)
 
+    tNext = time.time()
     while not mainExit.is_set():
+        tNext += dataManagerRate
         ## TODO: calculate data and convert to proper units
         if not SPIData.empty():
             rawData = SPIData.get_nowait()
@@ -243,6 +246,9 @@ def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData, 
                 logData.put(rawData, block = True, timeout = 0.1)
             except:
                 print("slow SD card")
+
+        while time.time() <= tNext:
+            time.sleep(dataManagerRate/3)
 
 def fileWriterFunction(dataQueue):
     timeCreated = time.asctime().replace(" ", ".").replace(":", ".")
@@ -355,10 +361,10 @@ if __name__ == "__main__":
         target = stepperFunction,
         kwargs = {
             'dataQueue': ampGaugeQueue,
-            'pinA': 22,
-            'pinB': 23,
-            'pinC': 24,
-            'pinD': 27,
+            'pinA': 30,
+            'pinB': 31,
+            'pinC': 32,
+            'pinD': 33,
             'timeConstant': coilTimeConstant
         }
     )
@@ -493,4 +499,4 @@ if __name__ == "__main__":
         mainWindow.update()
 
         while time.time() <= tNext:
-            pass
+            time.sleep(screenRefreshRate/3)
