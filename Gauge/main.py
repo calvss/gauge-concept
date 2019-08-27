@@ -12,9 +12,9 @@ from collections import deque
 
 BUFFERSIZE = 20
 
-coilTimeConstant = 0.002 # time each stepper coil is powered
+coilTimeConstant = 0.0018 # time each stepper coil is powered
 spiReceiveRate = 0.1 # receive message every 0.1 seconds
-stepperLoopRate = 0.02 # step motors every 0.01 seconds
+stepperLoopRate = 0.01 # step motors every 0.01 seconds
 screenRefreshRate = 0.01 # refresh screen every 0.01 seconds
 fileWriterRate = 1 # save to disk every second
 dataManagerRate = 0.05
@@ -22,7 +22,8 @@ dataManagerRate = 0.05
 labelHeaderSize = 10
 labelDataSize = 14
 
-pulseToSpd = 0.5171692
+#pulseToSpd = 0.5171692 # old constant
+pulseToSpd = 1.0343384
 pulseToKm = pulseToSpd*2/36000
 
 startupTime = time.time()
@@ -175,7 +176,7 @@ def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData, 
         ## TODO: calculate data and convert to proper units
         if not SPIData.empty():
             rawData = SPIData.get_nowait()
-            data = rawData
+            data = rawData[:]
             # Timestamps attached to each message
             # time in seconds
             currentTime = rawData[-1]
@@ -228,7 +229,8 @@ def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData, 
 
             # 106 steps in the dial
             speedPos = math.floor((speed / 80)*109)
-            ampPos = 109 - math.floor((current/220)*109)
+            #ampPos = 109 - math.floor((current/220)*109)
+            ampPos = 109 - math.floor(throttlePct * 109)
             # print(current, ampPos)
 
             try:
@@ -288,29 +290,6 @@ def fileWriterFunction(dataQueue):
 
         while time.time() <= tNext:
             time.sleep(0.5)
-        # os.replace(src = logFileName + ".backup", dst = logFileName + ".backup2")
-        # os.replace(src = logFileName, dst = logFileName + ".backup")
-    # timeCreated = time.time
-    # timeString = time.asctime().replace(" ", ".").replace(":", ".")
-    # dir = "/home/pi/gauge/Pot Gauge/"
-    #
-    # with open(dir + timeCreated + ".txt", 'a+') as logFile:
-    #     logFile.write("temp,current,pow,throttle,volt,speed,fwd,rev,tic,timestamp\r\n")
-    # with open(dir + timeCreated + ".txt", 'w+') as logFile:
-    #     writer = csv.writer(logFile, dialect = 'excel')
-    #     logFile.write("temp, current, pow, throttle, volt, speed, fwd, rev, tic, timestamp\r\n")
-    #     while not mainExit.is_set():
-    #         data = []
-    #         while not dataQueue.empty():
-    #             data.append(dataQueue.get_nowait())
-    #
-    #         for log in data:
-    #             # [-3::-1] means "everything except the last 2 items, in reverse order"
-    #             # last 2 items are stopword and timestamp
-    #             # [-1] is the last item
-    #             row = log[-3::-1] + [log[-1]]
-    #             writer.writerow(row)
-
 
 def exitHandler(sig, frame):
     mainExit.set()
