@@ -24,7 +24,7 @@ labelDataSize = 14
 
 #pulseToSpd = 0.5171692 # old constant
 pulseToSpd = 1.0343384
-pulseToKm = pulseToSpd*2/36000
+pulseToKm = pulseToSpd/36000
 
 startupTime = time.time()
 
@@ -169,6 +169,7 @@ def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData, 
 
     odoCount = float(0.0)
     speedData = deque([0], maxlen = 10)
+    speedAverage = 0
 
     tNext = time.time()
     while not mainExit.is_set():
@@ -195,7 +196,7 @@ def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData, 
             # make sure that extreme values due to noise is not included
             # cap speed to 80 kph
             # cap acceleration to 10 m/s2
-            dv = (abs(speedCount - speedData[-1]) * pulseToSpd) / 3.6 # kph to m/s
+            dv = (abs(speedCount - speedAverage) * pulseToSpd) / 3.6 # convert kph to m/s
             acceleration = dv / timeElapsed
 
             if (speedCount * pulseToSpd) < 80 and acceleration < 10:
@@ -254,7 +255,7 @@ def dataManagerFunction(speedGaugeQueue, ampGaugeQueue, processedData, SPIData, 
 
 def fileWriterFunction(dataQueue):
     timeCreated = time.asctime().replace(" ", ".").replace(":", ".")
-    dir = "/home/pi/gauge/"
+    dir = "/home/pi/gauge/Pot Gauge/"
     logFileName = dir + timeCreated + ".txt"
 
     # initially create empty files for backup purposes
@@ -330,7 +331,7 @@ if __name__ == "__main__":
             'pinA': 2,
             'pinB': 3,
             'pinC': 4,
-            'pinD': 5,
+            'pinD': 17,
             'timeConstant': coilTimeConstant
         }
     )
@@ -340,10 +341,10 @@ if __name__ == "__main__":
         target = stepperFunction,
         kwargs = {
             'dataQueue': ampGaugeQueue,
-            'pinA': 30,
-            'pinB': 31,
-            'pinC': 32,
-            'pinD': 33,
+            'pinA': 0,
+            'pinB': 5,
+            'pinC': 6,
+            'pinD': 13,
             'timeConstant': coilTimeConstant
         }
     )
